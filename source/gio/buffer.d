@@ -16,7 +16,7 @@ import std.range.primitives;
 
 // цели
 // 1 минимум коприрований данных
-// 2 input range штеукасфу
+// 2 input range interface
 // 3 не держать ненужные данные в памяти
 // сценарии использования
 // чтение из сокеты во временный буффер, добавление временного буффера к Buffer
@@ -40,49 +40,49 @@ struct Buffer {
         size_t              _pos;
         size_t              _end;
         Buffer              _buffer;
-        this(in Buffer b) {
+        this(in Buffer b) pure @safe {
             _buffer = b;
             _pos = 0;
             _end = _buffer.length;
         }
-        @property auto ref front() {
+        @property auto ref front() const pure @safe @nogc {
             return _buffer[_pos];
         }
-        @property void popFront() {
+        @property void popFront() pure @safe @nogc {
             _pos++;
         }
-        @property bool empty() {
+        @property bool empty() const pure @safe @nogc {
             return _pos == _end;
         }
-        @property auto save() {
+        @property auto save() pure @safe @nogc {
             return this;
         }
-        @property size_t length() {
+        @property size_t length() const pure @safe @nogc {
             return _end - _pos;
         }
-        auto ref opIndex(size_t i) {
+        auto ref opIndex(size_t i) const pure @safe {
             if ( i >= length ) {
                 throw new RangeError();
             }
             return _buffer[_pos + i];
         }
-        auto opSlice(size_t m, size_t n) {
+        auto opSlice(size_t m, size_t n) const pure @safe {
             auto another = _buffer[m..n];
             return another.range();
         }
-        auto opDollar() const pure @safe {
-            return _buffer.length;
+        auto opDollar() const pure @safe @nogc {
+            return length;
         }
-        @property auto ref back() {
+        @property auto ref back() const pure @safe @nogc  {
             return _buffer[_end-1];
         }
         @property auto popBack() {
             _end--;
         }
-        auto opCast(T)() if (is(T==immutable(ubyte)[])) {
+        auto opCast(T)() const pure @safe if (is(T==immutable(ubyte)[])) {
             return _buffer[_pos.._end].data();
         }
-        auto opCast(T)() if (is(T==ubyte[])) {
+        auto opCast(T)() const pure @safe if (is(T==ubyte[])) {
             return _buffer[_pos.._end].data().dup;
         }
     }
@@ -90,11 +90,11 @@ struct Buffer {
         _chunks = [s.representation];
         _length = s.length;
     }
-    this(string s) {
+    this(string s) pure @safe {
         _chunks = [s.representation];
         _length = s.length;
     }
-    this(in Buffer other, size_t m, size_t n) {
+    this(in Buffer other, size_t m, size_t n) pure @safe {
         ulong i;
         // produce slice view m..n
         if ( n == m ) {
@@ -119,30 +119,57 @@ struct Buffer {
             i++;
         }
     }
-    this(in Buffer other, size_t m, size_t n) immutable {
+    this(in Buffer other, size_t m, size_t n) immutable pure @safe {
+        ulong               i;
+        immutable(Chunk)[]  content;
+        // produce slice view m..n
+        if ( n == m ) {
+            return;
+        }
         _length = n - m;
-        _chunks = other._chunks;
+        n = n - m;
+        while( m > other._chunks[i].length ) {
+            m -= other._chunks[i].length;
+            i++;
+        }
+        auto to_copy = min(n, other._chunks[i].length - m);
+        if ( to_copy > 0 ) {
+            content ~= other._chunks[i][m..m+to_copy];
+        }
+        i++;
+        n -= to_copy;
+        while(n > 0) {
+            to_copy = min(n, other._chunks[i].length);
+            content ~= other._chunks[i][0..to_copy];
+            n -= to_copy;
+            i++;
+        }
+        _chunks = content;
     }
-   ~this() {
-    }
+    // this(in Buffer other, size_t m, size_t n) immutable {
+    //     _length = n - m;
+    //     _chunks = other._chunks;
+    // }
+//    ~this() {
+//     }
 
-    auto append(string s) {
+    auto append(string s) pure @safe {
         Chunk chunk = s.representation;
         _chunks ~= chunk;
         _length += chunk.length;
     }
-    auto append(Chunk s) {
+    auto append(Chunk s) pure @safe {
         _chunks ~= s;
         _length += s.length;
     }
 
-    auto length() const {
+    auto length() const pure @safe {
         return _length;
     }
     auto opDollar() const pure @safe {
         return _length;
     }
-    Buffer opSlice(size_t m, size_t n) const {
+    Buffer opSlice(size_t m, size_t n) const pure @safe {
         if ( this._length==0 || m == n ) {
             return Buffer();
         }
@@ -161,7 +188,7 @@ struct Buffer {
         assert(false, "Impossible");
     }
 
-    Chunk data() const {
+    Chunk data() const pure @trusted {
         if ( _chunks.length == 1 ) {
             return _chunks[0];
         }
@@ -173,7 +200,7 @@ struct Buffer {
         }
         return assumeUnique(r);
     }
-    _range range() {
+    _range range() const pure @safe {
         return _range(this);
     }
 }
@@ -196,12 +223,14 @@ unittest {
     b.append("ghi");
     assert(cast(string)c.data() == "abcdef123");
     // test slices
-    immutable Buffer di = b[1..5];
+    immutable Buffer di  = b[1..5];
+    immutable Buffer dii = di[1..2];
     // +di+
     // |bc|
     // |de|
     // +--+
     assert(cast(string)di.data == "bcde");
+    assert(equal(di.range.map!(c => cast(char)c), "bcde"));
     b = di[0..2];
     assert(cast(string)b.data, "ab");
     assert(b.length == 2);
@@ -245,11 +274,14 @@ unittest {
     auto bit = b.range();
     assert(!bit.canFind('4'));
     assert(bit.canFind('1'));
-    assert(equal(splitter(bit, 'd').array[0], ['a','b','c']));
-    assert(equal(splitter(bit, 'd').array[1], ['e', 'f', '1', '2', '3']));
+    assert(equal(splitter(bit, 'd').array[0], "abc"));
+    assert(equal(splitter(bit, 'd').array[1], "ef123"));
     assert(bit.length == 9);
     bit.popBack;
     assert(bit.length == 8);
     assertThrown!RangeError(bit[8]);
+    assert(bit[$-1] == '2');
+    assert(bit.back == '2');
     assert(equal(bit, ['a', 'b', 'c', 'd', 'e', 'f', '1', '2']));
+    writeln(cast(ubyte[])bit);
 }
