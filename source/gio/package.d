@@ -45,7 +45,7 @@ unittest {
 	import std.stdio;
 	import std.experimental.logger;
 	
-	globalLogLevel(LogLevel.trace);
+	globalLogLevel(LogLevel.info);
 	info("Testing best available event loop");
 	auto evl = eventLoop();
 	{
