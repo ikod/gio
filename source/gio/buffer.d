@@ -283,5 +283,5 @@ unittest {
     assert(bit[$-1] == '2');
     assert(bit.back == '2');
     assert(equal(bit, ['a', 'b', 'c', 'd', 'e', 'f', '1', '2']));
-    writeln(cast(ubyte[])bit);
+    assert(equal(cast(ubyte[])bit, ['a', 'b', 'c', 'd', 'e', 'f', '1', '2']));
 }
