@@ -32,10 +32,14 @@ import std.range.primitives;
 // приём данных продолжаем в Buffer C, для работы с полученными данными используем Buffer B
 // 
 struct Buffer {
+
+  package:
     alias Chunk = immutable(ubyte)[];
     size_t              _length;
     immutable(Chunk)[]  _chunks;
-    static struct _range {
+
+  public:
+    static struct _Range {
         // implement InputRange
         size_t              _pos;
         size_t              _end;
@@ -86,14 +90,17 @@ struct Buffer {
             return _buffer[_pos.._end].data().dup;
         }
     }
-    this(string s) immutable {
+
+    this(string s) immutable @safe {
         _chunks = [s.representation];
         _length = s.length;
     }
+
     this(string s) pure @safe {
         _chunks = [s.representation];
         _length = s.length;
     }
+
     this(in Buffer other, size_t m, size_t n) pure @safe {
         ulong i;
         // produce slice view m..n
@@ -119,6 +126,7 @@ struct Buffer {
             i++;
         }
     }
+
     this(in Buffer other, size_t m, size_t n) immutable pure @safe {
         ulong               i;
         immutable(Chunk)[]  content;
@@ -146,18 +154,13 @@ struct Buffer {
         }
         _chunks = content;
     }
-    // this(in Buffer other, size_t m, size_t n) immutable {
-    //     _length = n - m;
-    //     _chunks = other._chunks;
-    // }
-//    ~this() {
-//     }
 
     auto append(string s) pure @safe {
         Chunk chunk = s.representation;
         _chunks ~= chunk;
         _length += chunk.length;
     }
+
     auto append(Chunk s) pure @safe {
         _chunks ~= s;
         _length += s.length;
@@ -166,9 +169,11 @@ struct Buffer {
     auto length() const pure @safe {
         return _length;
     }
+
     auto opDollar() const pure @safe {
         return _length;
     }
+
     Buffer opSlice(size_t m, size_t n) const pure @safe {
         if ( this._length==0 || m == n ) {
             return Buffer();
@@ -177,6 +182,7 @@ struct Buffer {
         auto res = Buffer(this, m, n);
         return res;
     }
+
     auto ref opIndex(size_t n) const pure @safe {
         assert( n < _length );
         foreach(b; _chunks) {
@@ -200,8 +206,9 @@ struct Buffer {
         }
         return assumeUnique(r);
     }
-    _range range() const pure @safe {
-        return _range(this);
+
+    _Range range() const pure @safe {
+        return _Range(this);
     }
 }
 
@@ -265,12 +272,12 @@ unittest {
     static assert(hasLength!(Buffer));
 
 
-    static assert(isInputRange!(Buffer._range));
-    static assert(isForwardRange!(Buffer._range));
-    static assert(hasLength!(Buffer._range));
-    static assert(hasSlicing!(Buffer._range));
-    static assert(isBidirectionalRange!(Buffer._range));
-    static assert(isRandomAccessRange!(Buffer._range));
+    static assert(isInputRange!(Buffer._Range));
+    static assert(isForwardRange!(Buffer._Range));
+    static assert(hasLength!(Buffer._Range));
+    static assert(hasSlicing!(Buffer._Range));
+    static assert(isBidirectionalRange!(Buffer._Range));
+    static assert(isRandomAccessRange!(Buffer._Range));
     auto bit = b.range();
     assert(!bit.canFind('4'));
     assert(bit.canFind('1'));
