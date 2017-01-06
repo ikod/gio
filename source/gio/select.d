@@ -2,6 +2,9 @@ module gio.select;
 
 import std.datetime;
 import std.algorithm;
+import std.array;
+import std.format;
+import std.typecons;
 import std.experimental.logger;
 import core.stdc.errno: errno;
 import core.stdc.string: strerror;
@@ -22,6 +25,17 @@ version(Posix) {
 }
 
 class SelEventLoopImpl: EventLoopImpl {
+    private {
+        EventHandler*[EvTuple]  reads;
+        EventHandler*[EvTuple]  writes;
+        EventHandler*[EvTuple]  errs;
+        fd_set                  read_fds;
+        fd_set                  write_fds;
+        fd_set                  err_fds;
+        Nullable!Timer          timeout;
+        
+        bool                    running;
+    }
     struct EvTuple {
         int 			fd;
         AppEvent.Type	events;
@@ -32,23 +46,30 @@ class SelEventLoopImpl: EventLoopImpl {
             return (fd == other.fd && events == other.events);
         }
     }
-
-    EventHandler*[EvTuple]  reads;
-    EventHandler*[EvTuple]  writes;
-    EventHandler*[EvTuple]  errs;
-    fd_set					read_fds;
-    fd_set					write_fds;
-    fd_set					err_fds;
-
-    bool                    running;
-
+    override final void init() {
+    }
+    override final void deinit() {
+        reads = writes = errs = null;
+        timeout.nullify();
+    }
     override final void run(Duration d=1.seconds){
         running = true;
         while( running ) {
             FD_ZERO(&read_fds);
             FD_ZERO(&write_fds);
             FD_ZERO(&err_fds);
-            int fdmax;
+
+            int     fdmax;
+            timeval timev;
+
+            if ( !timeout.isNull ) {
+                auto now = Clock.currTime();
+                auto delta = timeout.expires - now;
+                assert(delta>0.seconds, "Trying to set expired timeout: %s".format(delta));
+                auto converted = delta.split!("seconds", "usecs");
+                timev.tv_sec  = cast(typeof(timev.tv_sec))converted.seconds;
+                timev.tv_usec = cast(typeof(timev.tv_usec))converted.usecs;
+            }
             foreach(evt; reads.byKey) {
                 debug tracef("select: adding %s to reads", evt);
                 FD_SET(evt.fd, &read_fds);
@@ -59,10 +80,20 @@ class SelEventLoopImpl: EventLoopImpl {
                 FD_SET(evt.fd, &write_fds);
                 fdmax = max(fdmax, evt.fd);
             }
-            auto ready = select(fdmax+1, &read_fds, &write_fds, null, null);
+            auto ready = select(fdmax+1, &read_fds, &write_fds, null, &timev);
             debug tracef("select returned %d", ready);
             if ( ready == 0 ) {
                 debug trace("select timed out");
+                if ( !timeout.isNull ) {
+                    auto now = Clock.currTime;
+                    debug tracef("timeoutExpires: %s, now: %s", timeout.expires, now);
+                    if ( now >= timeout.expires ) {
+                        debug trace("calling timer handler");
+                        ulong id = timeout.id;
+                        timeout.nullify;
+                        timerHandler(id);
+                    }
+                }
                 continue;
             }
             if ( ready == -1 ) {
@@ -70,6 +101,9 @@ class SelEventLoopImpl: EventLoopImpl {
                 continue;
             }
             foreach(int fd; 0..fdmax+1) {
+                if ( !running ) {
+                    break;
+                }
                 if ( FD_ISSET(fd, &write_fds) ) {
                     debug tracef("writing on %d", fd);
                     auto evt = EvTuple(fd, AppEvent.OUT);
@@ -116,48 +150,8 @@ class SelEventLoopImpl: EventLoopImpl {
         }
         return 0;
     };
-}
-
-unittest {
-    globalLogLevel(LogLevel.info);
-    info("Testing fallback(select) eventloop");
-    auto evl = EventLoop();
-    evl.impl = new SelEventLoopImpl();
-    {
-        import std.process;
-        import std.format;
-        import std.algorithm;
-
-        auto p = pipe();
-        int writes, reads;
-        int wr = p.writeEnd.fileno();
-        int rd = p.readEnd.fileno();
-        auto wrh = EventHandler(evl, wr, AppEvent.OUT);
-        auto rdh = EventHandler(evl, rd, AppEvent.IN);
-        void delegate(scope AppEvent) write_handler = (scope AppEvent e) {
-            tracef("Got writer event, data: %d", e.data);
-            wrh.deregister();
-            p.writeEnd.writeln("%d".format(writes));
-            p.writeEnd.flush();
-            if ( ++writes == 100 ) {
-                evl.stop();
-                return;
-            }
-        };
-        void delegate(scope AppEvent) read_handler = (scope AppEvent e) {
-            tracef("Got reader event, data: %d", e.data);
-
-            auto data_len = e.data<0?16:e.data;
-
-            char[] b = new char[data_len];
-            p.readEnd.readln(b);
-            reads++;
-            wrh.register(write_handler);
-        };
-
-        wrh.register(write_handler);
-        rdh.register(read_handler);
-        evl.run();
-        assert(reads == 99);
+    final override void timer(Timer t) {
+        debug tracef("Set timer to %s", t.expires);
+        timeout = t;
     }
 }
