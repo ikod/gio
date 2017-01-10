@@ -141,7 +141,7 @@ class OSXEventLoopImpl : EventLoopImpl {
                 h.handler(appEvent);
             }
         }
-        kevent(kqueue_fd, &in_events[0], in_index, null, 0, null);
+        //kevent(kqueue_fd, &in_events[0], in_index, null, 0, null);
         in_index = 0;
     }
     ///
@@ -154,9 +154,16 @@ class OSXEventLoopImpl : EventLoopImpl {
         e.filter = appEventToSysEvent(event);
         e.flags = EV_DELETE;
         e.udata = cast(void*)handler;
-        rc = kevent(kqueue_fd, &e, 1, null, 0, null);
-        debug if ( rc == -1 ) {
-            errorf("error removing handler: %s", fromStringz(strerror(errno)));
+        if ( in_index == MAXEVENTS ) {
+            // flush
+            rc = kevent(kqueue_fd, &in_events[0], in_index, null, 0, null);
+            debug if ( rc == -1 ) {
+                error("error adding handler: %s", fromStringz(strerror(errno)));
+            }
+            in_index = 0;
+        } else {
+            in_events[in_index++] = e;
+            rc = 0;
         }
         return rc;
     }
@@ -191,16 +198,20 @@ class OSXEventLoopImpl : EventLoopImpl {
         e.ident = timer_fd;
         e.filter = EVFILT_TIMER;
         e.flags = EV_ADD;
-//        if ( !periodic ) {
-            e.flags |= EV_ONESHOT;
-//        }
+        e.flags |= EV_ONESHOT;
         e.data = delay_ms;
         e.udata = cast(void*)t.id;
-        rc = kevent(kqueue_fd, &e, 1, null, 0, null);
-        debug if ( rc == -1 ) {
-            errorf("error setting timer: %s", fromStringz(strerror(errno)));
+        if ( in_index == MAXEVENTS ) {
+            // flush
+            rc = kevent(kqueue_fd, &in_events[0], in_index, null, 0, null);
+            debug if ( rc == -1 ) {
+                error("error adding handler: %s", fromStringz(strerror(errno)));
+            }
+            in_index = 0;
+        } else {
+            in_events[in_index++] = e;
+            rc = 0;
         }
-        
     }
 }
 auto appEventToSysEvent(AppEvent.Type ae) {
