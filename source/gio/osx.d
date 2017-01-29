@@ -109,6 +109,11 @@ class OSXEventLoopImpl : EventLoopImpl {
                 tv_sec:  cast(typeof(timespec.tv_sec))d.split!("seconds", "nsecs")().seconds,
                 tv_nsec: cast(typeof(timespec.tv_nsec))d.split!("seconds", "nsecs")().nsecs
             };
+            if ( in_index > 0 ) {
+                debug tracef("Flush %d events", in_index);
+                auto rc = kevent(kqueue_fd, &in_events[0], in_index, null, 0, null);
+                in_index = 0;
+            }
             debug trace("waiting for events");
             uint ready = kevent(kqueue_fd,
                                 cast(kevent_t*)&in_events[0], in_index,

@@ -9,6 +9,7 @@ import std.format;
 import core.exception;
 import std.exception;
 import std.range.primitives;
+import std.experimental.logger;
 
 ///
 // network buffer
@@ -213,6 +214,7 @@ struct Buffer {
 }
 
 unittest {
+    info("Test buffer");
     auto b = Buffer();
     b.append("abc");
     b.append("def".representation);
