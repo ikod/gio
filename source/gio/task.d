@@ -50,26 +50,44 @@ class Future(V) {
     static if ( is(V==void) ) {
         enum notVoid = false;
         alias onSuccessType = void delegate();
-        alias onFailType = void delegate(Exception);
-        alias onCompleteType = void delegate(Exception);
+        alias onFailType = void delegate();
+        alias onCompleteType = void delegate();
     }
     else {
         enum notVoid = true;
-        alias onSuccessType = void delegate(V);
-        alias onFailType = void delegate(Exception);
-        alias onCompleteType = void delegate(V, Exception);
+        alias onSuccessType = void delegate();
+        alias onFailType = void delegate();
+        alias onCompleteType = void delegate();
     }
     private {
         Exception _fail;
         Fiber     _waitor;
-        onSuccessType  onSuccess;
-        onFailType     onFail;
-        onCompleteType onComplete;
+        onSuccessType[]  _onSuccess;
+        onFailType[]     _onFail;
+        onCompleteType[] _onComplete;
         static if (notVoid) {
             Nullable!V  _value;
         }
         else {
             bool _ready;
+        }
+    }
+    @property void onSuccess(onSuccessType f) {
+        _onSuccess ~= f;
+        if ( isReady ) {
+            f();
+        }
+    }
+    @property void onFail(onFailType f) {
+        _onFail ~= f;
+        if ( isFailed ) {
+            f();
+        }
+    }
+    @property void onComplete(onCompleteType f) {
+        _onComplete ~= f;
+        if ( isReady || isFailed ) {
+            f();
         }
     }
     @property bool isReady() {
@@ -96,24 +114,48 @@ class Future(V) {
     //     _value = v;
     //     _wakeup();
     // }
+    void _handleOnComplete() {
+        foreach(h; _onComplete) {
+            h();
+        }
+    }
+    void _handleOnFail() {
+        foreach(h; _onFail) {
+            h();
+        }
+    }
+    void _handleOnSuccess() {
+        foreach(h; _onSuccess) {
+            h();
+        }
+    }
     void fail(Exception e) {
-        enforce(_fail is null, "You can call fail only once");
+        enforce(!isReady, "You can't set value for failed future");
+        enforce(!isFailed, "You can call fail only once");
         _fail = e;
+        _handleOnFail();
+        _handleOnComplete();
         _wakeup();
     }
     static if ( notVoid ) {
         void set(V v) {
-            enforce(_value.isNull, "You can't set value twice");
+            enforce(!isReady, "You can't set value twice");
+            enforce(!isFailed, "You can't set() failed future");
             tracef("set %s", v);
             _value = v;
+            _handleOnSuccess();
+            _handleOnComplete();
             _wakeup();
         }
     }
     else {
         void set() {
             enforce(!_ready, "You can't set value twice");
+            enforce(_fail is null, "You can't set() failed future");
             tracef("set void");
             _ready = true;
+            _handleOnSuccess();
+            _handleOnComplete();
             _wakeup();
         }
     }

@@ -1,6 +1,8 @@
 module gio;
 
+import std.typecons;
 import std.datetime;
+import std.exception;
 import std.array;
 import std.experimental.logger;
 import core.stdc.stdint : intptr_t, uintptr_t;
@@ -9,8 +11,15 @@ import core.thread;
 public import gio.loop;
 public import gio.socket;
 public import gio.task;
+public import gio.buffer;
 
 private static EventLoop evl;
+
+class TimedOutException: Exception {
+    this(string s = "") {
+        super(s);
+    }
+}
 
 static this() {
     version(OSX) {
@@ -60,6 +69,27 @@ auto delay(Duration d) {
 
     return f;
 }
+
+// auto readAsync(T)(T source, size_t upTo, Duration timeout, Flag!"partial" = Flag!"partial".yes) {
+//     auto b = new Buffer();
+//     Future!Buffer f;
+
+//     auto rdh = EventHandler(evl, source.fileno, AppEvent.IN);
+//     auto handler = delegate void(scope AppEvent e) {
+//         size_t  to_read = upTo - b.length();
+//         ubyte[] readBuffer = new ubyte[to_read];
+//         auto rc = source.rawRead(readBuffer);
+//         b.append(assumeUnique(readBuffer));
+//     };
+//     rdh.register(handler);
+
+//     auto timer = evl.startTimer(timeout, delegate void(scope AppEvent e) {
+//         f.fail(new TimedOutException());
+//         rdh.deregister();
+//     });
+
+//     return f;
+// }
 unittest {
     import std.exception;
     import core.exception;
@@ -186,8 +216,8 @@ unittest {
     }).call();
     evl.run();
 
-    info("test delay");
     // async/callback based future tests
+    info("test delay");
     int[] container;
     delay(2000.msecs).
         transform(delegate void () {
@@ -265,10 +295,14 @@ unittest {
             info("Catched exception");
         }
         assert(f.isFailed);
-        info("Testing wait for failed future - done");
+        info("Testing get() for failed future - done");
         stopEventLoop();
     }).call();
     evl.run();
+
+//    auto s = File("", "rb");
+//    auto f = readAsync(s, 2, 1.seconds, Yes.partial);
+
     // promise(function void() {
     //     return;
     // }).
