@@ -5,7 +5,7 @@ import std.exception;
 import std.format;
 import std.algorithm;
 import std.experimental.logger;
-import std.container:DList;
+import std.container;
 import std.stdio;
 import core.thread;
 
@@ -70,7 +70,7 @@ struct EventLoop {
     @property void impl(EventLoopImpl impl) {
         _impl = impl;
     }
-    ulong startTimer(Duration d, HandlerDelegate h, bool periodic = false) {
+    Timer startTimer(Duration d, HandlerDelegate h, bool periodic = false) {
         enforce(d > 0.seconds, "You can't add timer for past time %s".format(d));
         Timer t = Timer(Clock.currTime + d, h, _timer_id, this._impl);
         _timer_id++;
@@ -88,11 +88,11 @@ struct EventLoop {
             auto r = timerList[].find!"a > b"(t);
             timerList.insertBefore(r, t);
         } 
-        return t.id;
+        return t;
     }
-    void stopTimer(ulong id) {
+    void stopTimer(in ref Timer t) {
         assert(!timerList.empty);
-        auto r = timerList[].find!(t => t.id == id);
+        auto r = timerList[].find!(a => a.id == t.id);
         if (!r.empty ) {
             r.front.handler = null;
         }
