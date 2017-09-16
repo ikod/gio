@@ -150,7 +150,7 @@ class SelEventLoopImpl: EventLoopImpl {
         }
         return 0;
     };
-    final override void timer(Timer t) {
+    final override void timer(ref Timer t) {
         debug tracef("Set timer to %s", t.expires);
         timeout = t;
     }

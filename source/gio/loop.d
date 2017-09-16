@@ -16,7 +16,7 @@ interface EventLoopImpl {
     void deinit();
     int add(int fd, AppEvent.Type event, EventHandler* handler);
     int del(int fd, AppEvent.Type event, EventHandler* handler);
-    void timer(Timer);
+    void timer(ref Timer);
 };
 
 alias HandlerDelegate = void delegate (AppEvent);
