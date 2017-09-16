@@ -7,6 +7,7 @@ import std.algorithm;
 import std.experimental.logger;
 import std.container:DList;
 import std.stdio;
+import core.thread;
 
 interface EventLoopImpl {
     void init();
@@ -122,7 +123,7 @@ struct EventLoop {
 
 struct EventHandler {
     EventLoop       evl;
-    int  	  		fd;
+    int             fd;
     AppEvent.Type   events;
     void delegate (AppEvent) handler;
     bool registered;
@@ -183,8 +184,8 @@ struct AppEvent {
         HUP     = 0x20,
         TMO     = 0x40
     };
-    Type		events;
-    intptr_t 	data;
+    Type        events;
+    intptr_t    data;
 
     this(Type e, intptr_t d = intptr_t.max) {
         events = e;

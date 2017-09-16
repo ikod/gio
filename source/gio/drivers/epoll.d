@@ -1,4 +1,4 @@
-module gio.epoll;
+module gio.drivers.epoll;
 
 import gio.loop;
 

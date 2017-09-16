@@ -1,4 +1,4 @@
-﻿module gio.osx;
+﻿module gio.drivers.osx;
 
 import gio.loop;
 
@@ -196,6 +196,7 @@ class OSXEventLoopImpl : EventLoopImpl {
         return rc;
     }
     final override void timer(Timer t) {
+        init();
         enforce(timer_fd >= 0, "Timer file is not opened ");
         intptr_t delay_ms = (t.expires - Clock.currTime).split!"msecs".msecs;
         int rc;

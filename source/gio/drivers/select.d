@@ -1,4 +1,4 @@
-module gio.select;
+module gio.drivers.select;
 
 import std.datetime;
 import std.algorithm;

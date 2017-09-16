@@ -11,30 +11,36 @@ import core.thread;
 public import gio.loop;
 public import gio.socket;
 public import gio.task;
-public import gio.buffer;
+public import nbuff.buffer;
+
 
 private static EventLoop evl;
-
+static this() {
+    version(OSX) {
+        import gio.drivers.osx;
+        evl.impl = new OSXEventLoopImpl();
+    }
+    version(linux) {
+        import gio.drivers.epoll;
+        evl.impl = new EpollEventLoopImpl();
+    }
+    if ( evl.impl is null ) {
+        warning("WARNING: You are using fallback 'select' asyncio driver.");
+        import gio.drivers.select;
+        evl.impl = new SelEventLoopImpl();
+    }
+}
+static this() {
+    evl = getEventLoop();
+}
 class TimedOutException: Exception {
     this(string s = "") {
         super(s);
     }
 }
 
-static this() {
-    version(OSX) {
-        import gio.osx;
-        evl.impl = new OSXEventLoopImpl();
-    }
-    version(linux) {
-        import gio.epoll;
-        evl.impl = new EpollEventLoopImpl();
-    }
-    if ( evl.impl is null ) {
-        warning("WARNING: You are using fallback 'select' asyncio driver.");
-        import gio.select;
-        evl.impl = new SelEventLoopImpl();
-    }
+auto ref getEventLoop() {
+    return evl;
 }
 
 auto ref eventLoop() {
@@ -49,6 +55,23 @@ auto stopEventLoop() {
     evl.stop();
 }
 
+auto run_until_complete(void delegate() f) {
+    auto t = task({
+        try {
+            f();
+        } catch(Exception e){
+            error("uncought exception %s in run_unil_complete");
+        } finally {
+            stopEventLoop();
+        }
+    });
+    t.call();
+    if ( t.running() ) {
+        runEventLoop();
+    }
+    trace("competed");
+}
+
 auto sleep(Duration d) {
     trace("Sleep start");
     auto f = Fiber.getThis();
@@ -57,39 +80,35 @@ auto sleep(Duration d) {
     };
     evl.startTimer(d, handler);
     Fiber.yield();
-    trace("Sleep done");    
+    trace("Sleep done");
 }
 
-auto delay(Duration d) {
-    auto f = new Future!void();
 
-    evl.startTimer(d, delegate void(scope AppEvent e) {
-        f.set();
+//auto delay(Duration d) {
+//    auto f = new Future!bool();
+//
+//    evl.startTimer(d, delegate void(scope AppEvent e) {
+//        f.set_result(true);
+//    });
+//
+//    return f;
+//}
+
+unittest {
+    globalLogLevel(LogLevel.info);
+    bool ok;
+    run_until_complete({
+        auto t = task({
+            sleep(1.seconds);
+        });
+        t.call();
+        t.join();
+        ok = true;
     });
-
-    return f;
+    assert(ok);
+    info("testing run_until_complete - ok");
 }
 
-// auto readAsync(T)(T source, size_t upTo, Duration timeout, Flag!"partial" = Flag!"partial".yes) {
-//     auto b = new Buffer();
-//     Future!Buffer f;
-
-//     auto rdh = EventHandler(evl, source.fileno, AppEvent.IN);
-//     auto handler = delegate void(scope AppEvent e) {
-//         size_t  to_read = upTo - b.length();
-//         ubyte[] readBuffer = new ubyte[to_read];
-//         auto rc = source.rawRead(readBuffer);
-//         b.append(assumeUnique(readBuffer));
-//     };
-//     rdh.register(handler);
-
-//     auto timer = evl.startTimer(timeout, delegate void(scope AppEvent e) {
-//         f.fail(new TimedOutException());
-//         rdh.deregister();
-//     });
-
-//     return f;
-// }
 unittest {
     import std.exception;
     import core.exception;
@@ -97,7 +116,7 @@ unittest {
     import std.experimental.logger;
     import std.algorithm.comparison;
 
-    import gio.select;
+    import gio.drivers.select;
     
     void test() {
         import std.process;
@@ -105,7 +124,7 @@ unittest {
         import std.algorithm;
 
         globalLogLevel(LogLevel.info);
-        info("testing io");
+        trace("testing io");
         auto p = pipe();
         int writes, reads;
         int wr = p.writeEnd.fileno();
@@ -139,7 +158,7 @@ unittest {
         evl.run();
         assert(reads == 99);
 
-        info("testing timer");
+        trace("testing timer");
         SysTime[] timeouts;
         void delegate(scope AppEvent) timer_handler = (scope AppEvent e) {
             tracef("Got timeout event");
@@ -166,27 +185,26 @@ unittest {
             // should print something like 300, 500, 500
             //writeln(timeouts[i] - timeouts[i-1]);
         }
-        info("Test socket");
-        auto client = gioSocket();
-        auto server = gioSocket();
-        void function(gioSocket) process = (gioSocket so) {
-            trace("accepted connection");
-        };
+        trace("Test socket");
+        auto client = new gioTCPSocket();
+        auto server = new gioTCPSocket();
+        //void function(gioSocket) process = (gioSocket so) {
+        //    trace("accepted connection");
+        //};
 //        server.listen(8080)
     }
-    auto evl = eventLoop();
+    //auto evl = eventLoop();
     info("Testing best available event loop");
     test();
-    evl.impl = new SelEventLoopImpl();
+    info("Testing best available event loop - done ");
     info("Testing fallback event loop (select)");
+    evl.impl = new SelEventLoopImpl();
     test();
     info("Testing fallback event loop (select) - done");
     evl = eventLoop();
     task(delegate void() {
-        info("test in task");
         test();
-        info("test in task - done");
-        globalLogLevel(LogLevel.trace);
+        globalLogLevel(LogLevel.info);
         info("test sleep");
         task(function void() {
             sleep(2.seconds);
@@ -206,7 +224,7 @@ unittest {
         evl.run();
         info("test sleep - done");
     }).call();
-    globalLogLevel(LogLevel.trace);
+    globalLogLevel(LogLevel.info);
 //    evl = eventLoop();
     task(function void() {
         info("test sleep again");
@@ -215,103 +233,143 @@ unittest {
         stopEventLoop();
     }).call();
     evl.run();
+}
 
-    // async/callback based future tests
-    info("test delay");
-    int[] container;
-    delay(2000.msecs).
-        transform(delegate void () {
-            info("delayed 2");
-            container ~= 2;
-        }).
-        transform(delegate void() {
-            sleep(1.seconds);
-            info("delayed 3");
-            container ~= 3;
-        });
-    delay(1.seconds).
-        transform(delegate int(){
-            info("delayed 1");
-            container ~= 1;
-            return 1;
-        }).
-        transform(function int (int x) {
-            assert(x == 1);
-            sleep(3.seconds);
-            return x+1;
-        }).
-        transform(delegate void (int x) {
-            assert(x == 2);
-            infof("delayed 4 = %d", x);
-            container ~= 4;
-            stopEventLoop();
-        });
-    evl.run();
-    assert(equal(container, [1,2,3,4]));
+unittest {
+    import std.stdio;
+    import std.datetime;
+    import std.functional;
 
-    // task based future tests
-    task(function void() {
-        info("Testing wait for future");
-        auto f = delay(500.msecs);
-        info("Testing wait for future - future started");
-        assert(!f.isReady);
-        f.wait();
-        assert(f.isReady);
-        info("Testing wait for future - done");
-        stopEventLoop();
-    }).call();
-    evl.run();
-    task(function void() {
-        info("Testing wait for failed future");
-        auto f = delay(500.msecs).
-            transform(function void() {
-                info("Throwing");
-                throw new Exception("Test exception");
-            });
-        info("Testing wait for failed future - future started");
-        assert(!f.isReady);
+    auto f = new Future!int;
+    assertThrown!InvalidStateError(f.result());
+    f.set_result(1);
+    assert(f.done());
+    assert(f.result() == 1);
+    assert(f.cancelled() == false);     // not cancelled
+    assert(f.cancel() == false);        // can't cancel as it is ready
+    info("set_result - ok");
+    f = new Future!int;
+    assert(f.cancel() == true);
+    assertThrown!CancelledError(f.result());
+    info("cancel - ok");
+
+    f = new Future!int;
+    f.onCompleteType cb = delegate void (typeof(f) future) {
+        writefln("callback for future %s", f);
+        return;
+    };
+    f.add_done_callback(cb);
+    f.add_done_callback(cb);
+    assert(f.remove_done_callback(cb) == 2);
+    info("remove callbacks - ok");
+
+    //
+    // 1. add several callbacks (with ards using partial() and with no args
+    // 2. set result
+    // 3. verify that callbacks called
+    //
+    f = new Future!int;
+    int sum = 0;
+    int[] order;
+
+    auto cb_no_args = delegate void (typeof(f) future) {
+        sum += 5;
+    };
+    auto cb_with_arg = delegate void (int arg, typeof(f) future) {
+        sum += future.result() + arg;
+        order ~= arg;
+        return;
+    };
+    f.add_done_callback(&partial!(cb_with_arg, 1));
+    f.add_done_callback(&partial!(cb_with_arg, 2));
+    auto cb_with_arg2 = &partial!(cb_with_arg, 3);
+    f.add_done_callback(cb_with_arg2);
+    assert(f.remove_done_callback(cb_with_arg2) == 1);
+    f.add_done_callback(cb_no_args);
+    f.set_result(10);
+    assert(sum == 23 + 5 /* 10+1 + 10+2 + 5 */);
+    assert(order == [1,2]);
+    info("check callbacks1 - ok");
+
+    //
+    // 1. set result for Future
+    // 2. add callback
+    // 3. check that callback is called at the time it was added
+    //
+    f = new Future!int;
+    sum = 0;
+    order = [];
+    f.set_result(10);
+    f.add_done_callback(&partial!(cb_with_arg, 1));
+    assert(sum == 11 /* 10+1 */);
+    assert(order == [1]);
+    info("check callbacks2 - ok");
+
+    // check exceptions
+    f = new Future!int;
+    f.set_exception(new Exception("test"));
+    assertThrown!InvalidStateError(f.set_result(1));
+    assertThrown!InvalidStateError(f.set_exception(new Exception("test")));
+    assert(f.exception());
+    info("check exceptions - ok");
+
+    run_until_complete({
+        globalLogLevel(LogLevel.info);
+        auto slow_fun = delegate int (int d, int v) {
+            sleep(d.seconds);
+            return d + v;
+        };
+        auto t = async(slow_fun, 1, 6);
+        assert(t.await() == 7);
+        info("check await - ok");
+    });
+    run_until_complete({
+        globalLogLevel(LogLevel.info);
+        auto slow_fun = delegate int (int d) {
+            if ( d == 0 ) {
+                throw new Exception("test");
+            }
+            return 0;
+        };
+        auto t = async(slow_fun, 0);
+        assertThrown!Exception(t.await());
+        assert(t.exception());
+        info("check exception in await - ok");
+    });
+    run_until_complete({
+        info("parallel slow funcs - start");
+        auto slow_sum = delegate int (int d, int v) {
+            sleep(d.seconds);
+            return d + v;
+        };
+        auto slow_sub = delegate int (int d, int v) {
+            sleep(d.seconds);
+            return d - v;
+        };
+        auto asum = async(slow_sum, 2, 1);
+        auto asub = async(slow_sub, 1, 2);
+        assert(asum.await() ==  3);
+        assert(asub.await() == -1);
+        info("parallel slow funcs - ok");
+    });
+    run_until_complete({
+        info("test cancelation");
+        auto slow = delegate int (int d) {
+            sleep(d.seconds);
+            return d;
+        };
+        auto first  = async(slow, 1);
+        auto second = async(slow, 2);
+        auto c = delegate void(typeof(first) f) {
+            second.cancel();
+        };
+        first.add_done_callback(toDelegate(c));
         try {
-            f.wait();
+            await(first);
+            await(second);
         } catch(Exception e) {
-            info("Catched exception");
         }
-        assert(f.isFailed);
-        info("Testing wait for failed future - done");
-        stopEventLoop();
-    }).call();
-    evl.run();
-    task(function void() {
-        info("Testing get() for failed future");
-        auto f = delay(500.msecs).
-            transform(function void() {
-                info("Throwing");
-                throw new Exception("Test exception");
-            });
-        info("Testing get() for failed future - future started");
-        assert(!f.isReady);
-        try {
-            f.get();
-        } catch(Exception e) {
-            info("Catched exception");
-        }
-        assert(f.isFailed);
-        info("Testing get() for failed future - done");
-        stopEventLoop();
-    }).call();
-    evl.run();
-
-//    auto s = File("", "rb");
-//    auto f = readAsync(s, 2, 1.seconds, Yes.partial);
-
-    // promise(function void() {
-    //     return;
-    // }).
-    // then(function void() {
-    //     stopEventLoop();
-    // });
-    // evl.run();
-    // task(delegate void() {
-    //     auto p = promise();
-    //     p.wait();
-    // }).call();
+        assert(second.cancelled());
+        info("done");
+    });
 }

@@ -5,36 +5,47 @@ import std.exception;
 import core.thread;
 import std.experimental.logger;
 import std.traits;
-
+import std.algorithm;
+import std.functional;
 import gio.loop;
 
 alias emptyFunction = function void () {};
 
-class Task(F, A...) : Fiber {
+class Task(F, A...) : Fiber if (isCallable!F && is(ReturnType!F == void)) {
 
-    alias R = ReturnType!F;
     alias run = call;
+    enum State {INIT, RUN, DONE};
 
     private {
-        static if (!is(R == void)) {
-            R   _v;
-        }
-        F   _f;
-        A   _args;
+        F       _f;
+        A       _args;
+        Fiber   _joining;
+        State   _state = State.INIT;
     }
     private void run() {
-        static if (!is(R==void)) {
-            _v = _f(_args);
-        }
-        else {
+        _state = State.RUN;
+        try {
             _f(_args);
+        } catch (Exception e) {
+            error("Uncought exception in task function");
         }
-        yield();
+        _state = State.DONE;
+        if ( _joining ) {
+            Fiber cb = _joining;
+            _joining = null;
+            cb.call();
+        }
     }
     this(F f, A args) {
         _f = f;
         _args = args;
         super(&run);
+    }
+    @property running() const {
+        return _state != State.DONE;
+    }
+    void interrupt() {
+        return;
     }
 }
 
@@ -45,269 +56,210 @@ auto task(F)(F f) {
 auto task(F, A...)(F f, A args) {
     return new Task!(F, A)(f, args);
 }
-
-class Future(V) {
-    static if ( is(V==void) ) {
-        enum notVoid = false;
-        alias onSuccessType = void delegate();
-        alias onFailType = void delegate();
-        alias onCompleteType = void delegate();
-    }
-    else {
-        enum notVoid = true;
-        alias onSuccessType = void delegate();
-        alias onFailType = void delegate();
-        alias onCompleteType = void delegate();
-    }
-    private {
-        Exception _fail;
-        Fiber     _waitor;
-        onSuccessType[]  _onSuccess;
-        onFailType[]     _onFail;
-        onCompleteType[] _onComplete;
-        static if (notVoid) {
-            Nullable!V  _value;
-        }
-        else {
-            bool _ready;
-        }
-    }
-    @property void onSuccess(onSuccessType f) {
-        _onSuccess ~= f;
-        if ( isReady ) {
-            f();
-        }
-    }
-    @property void onFail(onFailType f) {
-        _onFail ~= f;
-        if ( isFailed ) {
-            f();
-        }
-    }
-    @property void onComplete(onCompleteType f) {
-        _onComplete ~= f;
-        if ( isReady || isFailed ) {
-            f();
-        }
-    }
-    @property bool isReady() {
-        static if (notVoid) {
-            return !_value.isNull;
-        }
-        else {
-            return _ready;
-        }
-    }
-    @property isFailed() {
-        return _fail !is null;
-    }
-    void _wakeup() {
-        if ( _waitor !is null ) {
-            trace("wakeup");
-            _waitor.call();
-        }
-    }
-    // @property auto value() {
-    //     return _value.get();
-    // }
-    // @property void value(V v) {
-    //     _value = v;
-    //     _wakeup();
-    // }
-    void _handleOnComplete() {
-        foreach(h; _onComplete) {
-            h();
-        }
-    }
-    void _handleOnFail() {
-        foreach(h; _onFail) {
-            h();
-        }
-    }
-    void _handleOnSuccess() {
-        foreach(h; _onSuccess) {
-            h();
-        }
-    }
-    void fail(Exception e) {
-        enforce(!isReady, "You can't set value for failed future");
-        enforce(!isFailed, "You can call fail only once");
-        _fail = e;
-        _handleOnFail();
-        _handleOnComplete();
-        _wakeup();
-    }
-    static if ( notVoid ) {
-        void set(V v) {
-            enforce(!isReady, "You can't set value twice");
-            enforce(!isFailed, "You can't set() failed future");
-            tracef("set %s", v);
-            _value = v;
-            _handleOnSuccess();
-            _handleOnComplete();
-            _wakeup();
-        }
-    }
-    else {
-        void set() {
-            enforce(!_ready, "You can't set value twice");
-            enforce(_fail is null, "You can't set() failed future");
-            tracef("set void");
-            _ready = true;
-            _handleOnSuccess();
-            _handleOnComplete();
-            _wakeup();
-        }
-    }
-    auto get() {
-        trace("Enter get");
-        while( !isReady && !isFailed ) {
-            wait();
-        }
-        if ( _fail ) {
-            trace("Rethrowing from get()");
-            throw _fail;
-        }
-        static if (notVoid) {
-            tracef("get - return %s", _value.get());
-            return _value.get();
-        } else {
-            trace("get - return void");
-        }
-    }
-    void wait() {
-        if ( isReady ) {
-            tracef("Value ready");
-            return;
-        }
-        tracef("Waiting");
-        auto thisF = Fiber.getThis();
-        enforce(thisF, "You can wait only in task/fiber context");
-        tracef("Fiber %s waiting", thisF);
-        _waitor = thisF;
+void join(T)(T task) {
+    enforce(task._joining is null);
+    while (task._state != T.State.DONE) {
+        task._joining = Fiber.getThis();
         Fiber.yield();
     }
-    // auto then(Fn)(Fn f) {
-    //     return promise(f, this.get());
-    // }
-    auto transform(Fn)(Fn f) {
-        alias R = ReturnType!Fn;
-        auto ft = new Future!R;
-        auto applyAndSet = delegate void() {
-            static if ( notVoid ) {
-                static if ( !is(R==void) ) {
-                    ft.set(f(this.get()));
-                }
-                else {
-                    f(this.get());
-                    ft.set();
-                }
-            }
-            else {
-                static if ( !is(R==void) ) {
-                    ft.set(f());
-                }
-                else {
-                    f();
-                    ft.set();
-                }
-            }
-        };
-        if ( isReady ) {
-            try {
-                applyAndSet();
-            } catch (Exception e) {
-                ft.fail(e);
-            }
-            return ft;
-        }
-        auto fb = new Fiber(() {
-            try {
-                applyAndSet();
-            } catch (Exception e) {
-                ft.fail(e);
-            }
-        });
-        this._waitor = fb;
-        return ft;
+}
+
+class InvalidStateError: Exception {
+    this(string msg, string file = __FILE__, size_t line = __LINE__) {
+        super(msg, file, line);
     }
 }
 
-auto promise(F, A...)(F f, lazy A args) {
-    alias R = ReturnType!F;
-    static if ( is(R==void) ) {
-        enum notVoid = false;
+class CancelledError: Exception {
+    this(string msg, string file = __FILE__, size_t line = __LINE__) {
+        super(msg, file, line);
     }
-    else {
-        enum notVoid = true;
-    }
-    auto ft = new Future!R();
-    auto t  = new Fiber( () {
-        static if (notVoid) {
-            static if (arity!f > 0) {
-                ft.set(f(args));
-            }
-            else {
-                ft.set(f());
-            }
-        }
-        else {
-            static if (arity!f > 0) {
-                f(args);
-            }
-            else {
-                f();
-            }
-            ft.set();
-        }
-    }).call();
-    return ft;
 }
 
-unittest {
-    import std.stdio;
-    import std.conv;
-    globalLogLevel(LogLevel.trace);
+class Future(V) {
+    alias onSuccessType = void delegate();
+    alias onFailType = void delegate();
+    alias onCompleteType = void delegate(typeof(this));
+    alias Tasktype = Task!(void delegate());
+    alias Valuetype = V;
 
-    int i;
-    auto t0 = task(emptyFunction);
-    auto t1 = task(delegate int (scope int x) {
-            i++;
-            return x+1;
-            },
-            1);
-    t1.call();
-    assert(i==1);
-    auto p = promise(delegate int (int a, int b) {
-        return i+a+b;
-    },
-    1, 2);
-    p.wait();
-    assert(p.get == 4);
-    globalLogLevel(LogLevel.trace);
-    info("test then");
-    auto p1 = promise(function int() {
-            return 42;
-        }).
-        transform(function int(int i) {
-            trace("set i+1");
-            return i+1;
-        }).
-        transform(function string(int i) {
-            trace("set string");
-            return to!string(i*2);
-        });
-    assert(p1.get == "86");
-    info("ok");
-    // auto p2 = promise(function void () {
-    //     return;
-    // }).
-    // then(function int() {
-    //     return 1;
-    // }).
-    // then(function int(int a){
-    //     return a+1;
-    // });
-    // assert(p2.get == 2);
-    // auto p3 = promise(function void() {});
+    private {
+        V                   _value;
+        bool                _ready = false;
+        bool                _cancelled = false;
+        Exception           _exception = null;
+        onCompleteType[]    _done_callbacks;
+        Tasktype            _task;
+    }
+
+    void _schedule_callbacks() {
+        foreach(ref cb; _done_callbacks) {
+            cb(this);
+            //call_soon(cb, this); // TODO
+        }
+    }
+    /**
+     +   “set_result(result)
+     +   Mark the future done and set its result.
+     +
+     +   If the future is already done when this method is called, raises InvalidStateError.”
+     +
+     +   Excerpt From: Python Documentation Authors. “Python 3.5.4 documentation.” iBooks.
+     **/
+    void set_result(V v){
+        if ( done() ) {
+            throw new InvalidStateError("try to set_result on already done Future");
+        }
+        _value = v;
+        _ready = true;
+        _schedule_callbacks();
+    }
+    /**
+     +   “result()
+     +   Return the result this future represents.
+     +
+     +   If the future has been cancelled, raises CancelledError.
+     +   If the future’s result isn’t yet available, raises InvalidStateError.
+     +   If the future is done and has an exception set, this exception is raised.”
+     +
+     +   Excerpt From: Python Documentation Authors. “Python 3.5.4 documentation.” iBooks.
+     **/
+    V result() {
+        if ( _cancelled ) {
+            throw new CancelledError("get result from cancelled Future");
+        }
+        if ( ! _ready ) {
+            throw new InvalidStateError("get result from not ready Future");
+        }
+        if ( _exception ) {
+            throw _exception;
+        }
+        return _value;
+    }
+    /**
+        “done()
+        Return True if the future is done.
+
+        Done means either that a result / exception are available, or that the future was cancelled.”
+
+        Excerpt From: Python Documentation Authors. “Python 3.5.4 documentation.” iBooks.
+    **/
+    bool done() const pure nothrow @nogc{
+        return _ready || _exception || _cancelled;
+    }
+    /**
+        “cancel()
+        Cancel the future and schedule callbacks.
+
+        If the future is already done or cancelled, return False.
+        Otherwise, change the future’s state to cancelled, schedule the callbacks and return True.”
+
+        Excerpt From: Python Documentation Authors. “Python 3.5.4 documentation.” iBooks.
+    */
+    bool cancel() {
+        if ( done() ) {
+            return false;
+        }
+        if ( _task && _task.running ) {
+            _task.interrupt();
+        }
+        _cancelled = true;
+        _schedule_callbacks();
+        return true;
+    }
+    bool cancelled() const pure nothrow @nogc @safe {
+        return _cancelled;
+    }
+    /**
+        “Add a callback to be run when the future becomes done.
+
+        The callback is called with a single argument - the future object.
+        If the future is already done when this is called, the callback is scheduled with call_soon().”
+
+        Excerpt From: Python Documentation Authors. “Python 3.5.4 documentation.” iBooks.
+    */
+    void add_done_callback(onCompleteType fn) {
+        if ( done() ) {
+            // todo call_soon(fn)
+            fn(this);
+        } else {
+            _done_callbacks ~= fn;
+        }
+    }
+    /**
+        “remove_done_callback(fn)
+        Remove all instances of a callback from the “call when done” list.
+
+        Returns the number of callbacks removed.”
+
+        Excerpt From: Python Documentation Authors. “Python 3.5.4 documentation.” iBooks.
+    */
+    size_t remove_done_callback(onCompleteType fn) {
+        auto length_before = _done_callbacks.length;
+        _done_callbacks = _done_callbacks.remove!((a) => fn == a);
+        return length_before - _done_callbacks.length;
+    }
+    /**
+        “exception()
+        Return the exception that was set on this future.
+
+        The exception (or None if no exception was set) is returned only if the future is done.
+        If the future has been cancelled, raises CancelledError. If the future isn’t done yet, raises InvalidStateError.”
+
+        Excerpt From: Python Documentation Authors. “Python 3.5.4 documentation.” iBooks.
+     */
+    Exception exception() {
+        if ( _cancelled ) {
+            throw new CancelledError("Called exception() on cancelled Future");
+        }
+        if ( _ready || _exception ) {
+            return _exception;
+        }
+        throw new InvalidStateError("exception called on not done Future");
+    }
+    /**
+        “set_exception(exception)
+        Mark the future done and set an exception.
+
+        If the future is already done when this method is called, raises InvalidStateError.”
+
+        Excerpt From: Python Documentation Authors. “Python 3.5.4 documentation.” iBooks.
+     */
+     void set_exception(Exception e) {
+        if ( done() ) {
+            throw new InvalidStateError("Called set_exception on done future");
+        }
+        _exception = e;
+     }
+     auto await() {
+        if ( _task.running() ) {
+            _task.join();
+        }
+        return result();
+     }
 }
+
+F.Valuetype await(F)(F f) {
+    return f.await();
+}
+
+auto await_any(F...)(F fs) {
+    static foreach(f; fs) {
+        f.add_done_callback();
+    }
+}
+
+auto async(F, A...)(F f, A a) if (isCallable!f) {
+    auto future = new Future!(ReturnType!f);
+    future._task = task({
+        try {
+            auto v = f(a);
+            future.set_result(v);
+        } catch(Exception e) {
+            future.set_exception(e);
+        }
+    });
+    future._task.call();
+    return future;
+}
+
