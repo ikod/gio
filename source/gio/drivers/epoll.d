@@ -95,7 +95,7 @@ class EpollEventLoopImpl: EventLoopImpl {
         e.data.ptr = handler;
         return epoll_ctl(epoll_fd, EPOLL_CTL_DEL, fd, &e);
     };
-    final override void timer(in ref Timer t) {
+    final override void start_timer(in Timer t) @trusted {
         enforce(timer_fd>=0, "Timer file is not opened");
         itimerspec itimer;
         auto d = t.expires - Clock.currTime;

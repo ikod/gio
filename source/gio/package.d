@@ -168,10 +168,6 @@ unittest {
             }
         };
         //globalLogLevel(LogLevel.trace);
-        auto ta = Timer(Clock.currTime + 10.msecs, null);
-        auto tb = Timer(Clock.currTime + 5.msecs, null);
-        assert(tb<ta);
-        assert(ta>tb);
         evl.startTimer(1000.msecs, timer_handler);
         evl.startTimer(500.msecs,  timer_handler);
         evl.startTimer(1500.msecs, timer_handler);
@@ -185,13 +181,17 @@ unittest {
             // should print something like 300, 500, 500
             //writeln(timeouts[i] - timeouts[i-1]);
         }
-        trace("Test socket");
-        auto client = new gioTCPSocket();
-        auto server = new gioTCPSocket();
-        //void function(gioSocket) process = (gioSocket so) {
-        //    trace("accepted connection");
-        //};
-//        server.listen(8080)
+        void delegate(AppEvent) impossible = (AppEvent e) {
+            throw new Exception("Must not happen");
+        };
+        void delegate(AppEvent) stop_loop = (AppEvent e) {
+            evl.stop();
+        };
+        auto i = evl.startTimer(100.msecs, impossible);
+        evl.startTimer(200.msecs, stop_loop);
+        evl.startTimer(400.msecs, impossible);
+        evl.stopTimer(i);
+        evl.run(1.seconds);
     }
     //auto evl = eventLoop();
     info("Testing best available event loop");

@@ -7,6 +7,7 @@ import std.algorithm;
 import std.experimental.logger;
 import std.container;
 import std.stdio;
+import std.typecons;
 import core.thread;
 
 interface EventLoopImpl {
@@ -16,23 +17,35 @@ interface EventLoopImpl {
     void deinit();
     int add(int fd, AppEvent.Type event, EventHandler* handler);
     int del(int fd, AppEvent.Type event, EventHandler* handler);
-    void timer(ref Timer);
+    void start_timer(Timer) @safe;
 };
 
 alias HandlerDelegate = void delegate (AppEvent);
 
-struct  Timer {
+class Timer {
     SysTime         expires;
     HandlerDelegate handler;
     ulong           id;
     EventLoopImpl   evl;
-
-    int opCmp(ref const Timer other) {
+    this(SysTime e, HandlerDelegate h, ulong id, EventLoopImpl evl) pure nothrow @nogc @safe {
+        this.expires = e;
+        this.handler = h;
+        this.id = id;
+        this.evl = evl;
+    }
+    int opCmp(in Timer other) const nothrow pure @safe {
         return expires < other.expires?-1:1;
+    }
+    override string toString() const {
+        return "Timer(%s, %d, %s, %s)".format(expires, id, handler, evl);
     }
 }
 
-static  DList!Timer timerList;
+static  RedBlackTree!(Timer) timerList;
+
+static this() {
+    timerList = new RedBlackTree!(Timer)();
+}
 
 static void timerHandler(ulong id)
 in {
@@ -41,11 +54,13 @@ in {
     }
 body{
     auto thisTimer = timerList.front;
+    debug tracef("process timer %s, delay %s", thisTimer, thisTimer.expires - Clock.currTime);
+    enforce(thisTimer.id == id, "Front  %d != %d".format(thisTimer.id, id));
     if (thisTimer.handler) {
         thisTimer.handler(AppEvent(AppEvent.TMO));
     }
     if ( timerList.empty ) {
-        debug trace("Empty timerList, probably evenloop were stopped from inside handler");
+        debug tracef("Empty timerList, probably evenloop were stopped from inside handler");
         return;
     }
     timerList.removeFront;
@@ -55,14 +70,15 @@ body{
     }
     if ( !timerList.empty ) {
         auto nextTimer = timerList.front;
-        nextTimer.evl.timer(nextTimer);
+        nextTimer.evl.start_timer(nextTimer);
+        debug tracef("set next timer %s", nextTimer);
     }
 }
 
 struct EventLoop {
     private {
         EventLoopImpl   _impl;
-        ulong           _timer_id;
+        ulong           _timer_id = 1;
     }
     @property EventLoopImpl impl() pure @safe {
         return _impl;
@@ -70,31 +86,24 @@ struct EventLoop {
     @property void impl(EventLoopImpl impl) {
         _impl = impl;
     }
-    Timer startTimer(Duration d, HandlerDelegate h, bool periodic = false) {
+    Timer startTimer(Duration d, HandlerDelegate h, bool periodic = false) @safe {
         enforce(d > 0.seconds, "You can't add timer for past time %s".format(d));
-        Timer t = Timer(Clock.currTime + d, h, _timer_id, this._impl);
+        Timer t = new Timer(Clock.currTime + d, h, _timer_id, this._impl);
         _timer_id++;
         if ( timerList.empty || t <= timerList.front ) {
-            // 1. insert it in front of timers list
-            timerList.insertFront(t);
-            // 2. add new timer to kernel
-            _impl.timer(t);
-        } else if ( t > timerList.back ) {
-            // add to tail
-            timerList.insertBack(t);
-        } else if ( t > timerList.front ) {
-            // between first and last
-            // just insert into middle, no kernel manipulation
-            auto r = timerList[].find!"a > b"(t);
-            timerList.insertBefore(r, t);
-        } 
+            // add new timer to kernel
+            _impl.start_timer(t);
+        }
+        timerList.insert(t);
         return t;
     }
-    void stopTimer(in ref Timer t) {
+    void stopTimer(Timer t) {
         assert(!timerList.empty);
-        auto r = timerList[].find!(a => a.id == t.id);
-        if (!r.empty ) {
-            r.front.handler = null;
+        auto a = scoped!Timer(t.expires, null, t.id, null);
+        auto r = timerList.equalRange(a);
+        enforce(!r.empty, "Failed to find Timer to delete");
+        foreach(i; r) {
+            i.handler = null;
         }
     }
     int add(int fd, AppEvent.Type ev, EventHandler* handler) {

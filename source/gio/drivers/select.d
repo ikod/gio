@@ -32,7 +32,7 @@ class SelEventLoopImpl: EventLoopImpl {
         fd_set                  read_fds;
         fd_set                  write_fds;
         fd_set                  err_fds;
-        Nullable!Timer          timeout;
+        Timer                   timeout;
         
         bool                    running;
     }
@@ -50,7 +50,7 @@ class SelEventLoopImpl: EventLoopImpl {
     }
     override final void deinit() {
         reads = writes = errs = null;
-        timeout.nullify();
+        timeout = null;
     }
     override final void run(Duration d=1.seconds){
         running = true;
@@ -62,9 +62,10 @@ class SelEventLoopImpl: EventLoopImpl {
             int     fdmax;
             timeval timev;
 
-            if ( !timeout.isNull ) {
+            if ( timeout !is null ) {
                 auto now = Clock.currTime();
                 auto delta = timeout.expires - now;
+                debug tracef("delta = %s, timeout = %s", delta, timeout);
                 assert(delta>0.seconds, "Trying to set expired timeout: %s".format(delta));
                 auto converted = delta.split!("seconds", "usecs");
                 timev.tv_sec  = cast(typeof(timev.tv_sec))converted.seconds;
@@ -84,13 +85,13 @@ class SelEventLoopImpl: EventLoopImpl {
             debug tracef("select returned %d", ready);
             if ( ready == 0 ) {
                 debug trace("select timed out");
-                if ( !timeout.isNull ) {
+                if ( timeout !is null ) {
                     auto now = Clock.currTime;
                     debug tracef("timeoutExpires: %s, now: %s", timeout.expires, now);
                     if ( now >= timeout.expires ) {
                         debug trace("calling timer handler");
                         ulong id = timeout.id;
-                        timeout.nullify;
+                        timeout = null;
                         timerHandler(id);
                     }
                 }
@@ -150,7 +151,7 @@ class SelEventLoopImpl: EventLoopImpl {
         }
         return 0;
     };
-    final override void timer(ref Timer t) {
+    final override void start_timer(Timer t) {
         debug tracef("Set timer to %s", t.expires);
         timeout = t;
     }

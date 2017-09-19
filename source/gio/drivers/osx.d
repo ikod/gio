@@ -195,7 +195,7 @@ class OSXEventLoopImpl : EventLoopImpl {
         }
         return rc;
     }
-    final override void timer(in ref Timer t) {
+    final override void start_timer(in Timer t) @trusted {
         init();
         enforce(timer_fd >= 0, "Timer file is not opened ");
         intptr_t delay_ms = (t.expires - Clock.currTime).split!"msecs".msecs;
