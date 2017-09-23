@@ -1,0 +1,11 @@
+  85,96%  t0       t0                 [.] _D3std9algorithm9searching135__T4findS603gio4loop9EventLoop9stopTimerMFKxS3gio4loop5TimerZ9__lambda2TS3std9container5dlist27__T5DListTS3gio4loop5TimerZ5DList5RangeZ4findMFNaNbNfS3std9container5dlist27__T5DListTS3gio4loop5TimerZ5DList5RangeZS3std9container5dlist27__T5DListTS3gio4loop5TimerZ5DList5Range
+   5,33%  t0       [kernel.kallsyms]  [k] exit_to_usermode_loop
+   3,63%  t0       [vboxguest]        [k] VbglGRPerform
+   3,15%  t0       [kernel.kallsyms]  [k] VbglGRPerform
+   0,48%  t0       t0                 [.] _D4core6atomic69__T10atomicLoadVE4core6atomic11MemoryOrderi1TC4core4sync5mutex5MutexZ10atomicLoadFNaNbNiNfKOxC4core4sync5mutex5MutexZC4core4sync5mutex5Mutex
+   0,24%  t0       [kernel.kallsyms]  [k] __do_softirq
+   0,24%  t0       [vdso]             [.] __vdso_clock_gettime
+   0,24%  t0       [vdso]             [.] 0x0000000000000a97
+   0,24%  t0       t0                 [.] _D2gc4impl12conservative2gc3Gcx10smallAllocMFNbhKmkZPv
+   0,24%  t0       t0                 [.] _D2gc4impl12conservative2gc3Gcx7recoverMFNbZm
+   0,24%  t0       t0                 [.] memset@plt

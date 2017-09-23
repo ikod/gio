@@ -11,6 +11,8 @@ import core.thread;
 public import gio.loop;
 public import gio.socket;
 public import gio.task;
+public import gio.transports;
+
 public import nbuff.buffer;
 
 

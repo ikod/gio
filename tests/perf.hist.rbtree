@@ -1,0 +1,10 @@
+  66,00%  t0       [kernel.kallsyms]  [k] VbglGRPerform
+  18,00%  t0       [vboxguest]        [k] VbglGRPerform
+   2,00%  t0       [kernel.kallsyms]  [k] do_timerfd_settime
+   2,00%  t0       [kernel.kallsyms]  [k] entry_SYSCALL_64_after_swapgs
+   2,00%  t0       [kernel.kallsyms]  [k] finish_task_switch
+   2,00%  t0       libc-2.23.so       [.] epoll_ctl
+   2,00%  t0       t0                 [.] _D2gc4impl12conservative2gc14ConservativeGC200__T9runLockedS79_D2gc4impl12conservative2gc14ConservativeGC12mallocNoSyncMFNbmkKmxC8TypeInfoZPvS40_D2gc4impl12conservative2gc10mallocTimelS40_D2gc4impl12conservative2gc10numMallocslTmTkTmTxC8TypeInfoZ9runLockedMFNbKmKkKmKxC8TypeInfoZPv
+   2,00%  t0       t0                 [.] _D3gio4loop9EventLoop10startTimerMFS4core4time8DurationDFS3gio4loop8AppEventZvbZS3gio4loop5Timer
+   2,00%  t0       t0                 [.] _D3gio4loop9EventLoop9stopTimerMFKxS3gio4loop5TimerZv
+   2,00%  t0       t0                 [.] _D3gio7drivers5epoll18EpollEventLoopImpl11start_timerMFKxS3gio4loop5TimerZv
